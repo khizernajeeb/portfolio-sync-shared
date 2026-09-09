@@ -212,3 +212,77 @@ def parse(request: ParseRequest) -> ParseResponse:
         problems=problems,
         pdfs_read=read,
     )
+
+
+class AnalyzeRequest(BaseModel):
+    """Every trade in the sheet, so realised profit can be split by tax year."""
+    transactions: list[list[Any]] = Field(
+        description="rows as [date YYYY-MM-DD, scrip, type, qty, debit, credit], in sheet order"
+    )
+
+
+class TaxYearRow(BaseModel):
+    label: str
+    sales: int
+    proceeds: float
+    cost: float
+    adjustments: float
+    realised: float
+
+
+class AnalyzeResponse(BaseModel):
+    tax_years: list[TaxYearRow]
+    total_realised: float
+    notes: list[str]
+
+
+@app.post("/analyze", response_model=AnalyzeResponse)
+def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
+    """Realised profit per tax year, by replaying every trade through FIFO.
+
+    This stays in Python rather than moving into the caller's Apps Script for
+    the same reason the parsing does: one implementation of a calculation that
+    money decisions rest on, not two that quietly drift apart.
+    """
+    from datetime import date as _date
+
+    import tax
+
+    trades = []
+    for order, row in enumerate(request.transactions):
+        row = list(row) + [""] * (6 - len(row))
+        try:
+            year, month, day = (int(part) for part in str(row[0])[:10].split("-"))
+            when = _date(year, month, day)
+        except (ValueError, TypeError):
+            continue
+        trades.append({
+            "order": order,
+            "date": when,
+            "scrip": str(row[1]).strip().upper(),
+            "type": str(row[2]).strip().upper(),
+            "qty": _number(row[3]) or 0.0,
+            "debit": _number(row[4]) or 0.0,
+            "credit": _number(row[5]) or 0.0,
+        })
+
+    if not trades:
+        return AnalyzeResponse(tax_years=[], total_realised=0.0, notes=[])
+
+    years, notes = tax.realised_by_year(trades)
+    rows = [
+        TaxYearRow(
+            label=tax.label(year),
+            sales=data["sales"],
+            proceeds=round(data["proceeds"], 2),
+            cost=round(data["cost"], 2),
+            adjustments=round(data["adjustments"], 2),
+            realised=round(data["realised"], 2),
+        )
+        for year, data in sorted(years.items())
+    ]
+    return AnalyzeResponse(
+        tax_years=rows,
+        total_realised=round(sum(r.realised for r in rows), 2),
+        notes=notes,
+    )
