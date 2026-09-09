@@ -1,0 +1,16 @@
+# Render Blueprint - "New > Blueprint" reads this and needs nothing typed in.
+#
+# There are no environment variables here on purpose. The service holds no
+# credentials and reaches nobody's account, so there is nothing to configure
+# and nothing to leak if the deploy is ever shared or forked.
+services:
+  - type: web
+    name: portfolio-sync
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
