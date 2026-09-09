@@ -29,7 +29,6 @@ const TX_LAST_COL = 9;
 const HOLD_FIRST_ROW = 5;
 const PRICE_COL = 13;
 
-const MARKET_WATCH = 'https://dps.psx.com.pk/market-watch';
 
 
 function onOpen() {
@@ -125,32 +124,20 @@ function checkEveryScripIsTracked(sheet, notes) {
 /* -------------------------------------------------------------- prices -- */
 
 function fetchPrices() {
-  const html = UrlFetchApp.fetch(MARKET_WATCH, {
-    muteHttpExceptions: true,
-    headers: { 'User-Agent': 'Mozilla/5.0' }
-  }).getContentText();
+  // Apps Script cannot reach the exchange - UrlFetchApp answers "Address
+  // unavailable" from Google's network - so the service fetches it instead.
+  return post('/prices-for', { symbols: neededScrips() }).prices;
+}
 
-  const head = /<thead[\s\S]*?<\/thead>/i.exec(html);
-  if (!head) throw new Error('market-watch has no header row');
-  const columns = (head[0].match(/data-name="([^"]*)"/g) || [])
-    .map(function (m) { return m.slice(11, -1); });
-  const symbolAt = columns.indexOf('symbol');
-  const closeAt = columns.indexOf('close');
-  if (symbolAt < 0 || closeAt < 0) throw new Error('market-watch changed shape');
-
-  const prices = {};
-  (html.match(/<tr>[\s\S]*?<\/tr>/g) || []).forEach(function (row) {
-    const cells = (row.match(/<td[\s\S]*?<\/td>/g) || []).map(function (cell) {
-      const order = /data-order="([^"]*)"/.exec(cell);
-      return order ? order[1] : cell.replace(/<[^>]*>/g, '').trim();
-    });
-    if (cells.length <= Math.max(symbolAt, closeAt)) return;
-    const value = parseFloat(cells[closeAt]);
-    if (!isNaN(value)) prices[cells[symbolAt].trim().toUpperCase()] = value;
+function neededScrips() {
+  const tab = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOLDINGS);
+  const slots = findTotalRow(tab) - HOLD_FIRST_ROW;
+  const names = [];
+  tab.getRange(HOLD_FIRST_ROW, 1, slots, 1).getValues().forEach(function (r) {
+    const scrip = String(r[0]).trim().toUpperCase();
+    if (scrip) names.push(scrip);
   });
-
-  if (!Object.keys(prices).length) throw new Error('market-watch returned no prices');
-  return prices;
+  return names;
 }
 
 function refreshPrices(sheet) {

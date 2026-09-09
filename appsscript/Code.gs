@@ -40,7 +40,6 @@ const RECENT_DAYS = 7;          // a missed night is picked up the next one
 const PDFS_PER_CALL = 40;       // one request to the parse service
 const TIME_BUDGET_MS = 4 * 60 * 1000;   // Apps Script stops us at six
 
-const MARKET_WATCH = 'https://dps.psx.com.pk/market-watch';
 
 
 /* ---------------------------------------------------------------- menu -- */
@@ -323,50 +322,31 @@ function checkEveryScripIsTracked(sheet, notes) {
 /* -------------------------------------------------------------- prices -- */
 
 /**
- * Current prices, read straight from the exchange by this script.
+ * Current prices, via the parse service.
  *
- * Deliberately not routed through the parse service: each person pulling their
- * own market data is plainly personal use, whereas one service handing that
- * data out to many people is redistribution, which PSX restricts.
- *
- * Columns are located from the header's data-name attributes rather than by
- * position, so a reordered table cannot shift which number is read as a price.
+ * The first design had this script read the exchange directly, so that each
+ * person pulled their own market data and no one service was redistributing
+ * it. Apps Script cannot reach the site at all - UrlFetchApp answers
+ * "Address unavailable" from Google's network - so the request goes through
+ * the service, which can. The service only proxies the same public page
+ * anyone can open, caches it briefly, and stores nothing.
  */
 function fetchPrices() {
-  const html = UrlFetchApp.fetch(MARKET_WATCH, {
-    muteHttpExceptions: true,
-    headers: { 'User-Agent': 'Mozilla/5.0' }
-  }).getContentText();
-
-  const head = /<thead[\s\S]*?<\/thead>/i.exec(html);
-  if (!head) throw new Error('market-watch has no header row');
-  const columns = (head[0].match(/data-name="([^"]*)"/g) || [])
-    .map(function (m) { return m.slice(11, -1); });
-  const symbolAt = columns.indexOf('symbol');
-  const closeAt = columns.indexOf('close');
-  if (symbolAt < 0 || closeAt < 0) throw new Error('market-watch changed shape');
-
-  const prices = {};
-  (html.match(/<tr>[\s\S]*?<\/tr>/g) || []).forEach(function (row) {
-    const cells = (row.match(/<td[\s\S]*?<\/td>/g) || []).map(function (cell) {
-      const order = /data-order="([^"]*)"/.exec(cell);
-      return order ? order[1] : cell.replace(/<[^>]*>/g, '').trim();
-    });
-    if (cells.length <= Math.max(symbolAt, closeAt)) return;
-    const value = parseFloat(cells[closeAt]);
-    if (!isNaN(value)) prices[cells[symbolAt].trim().toUpperCase()] = value;
-  });
-
-  if (!Object.keys(prices).length) throw new Error('market-watch returned no prices');
-  return prices;
+  return post('/prices-for', { symbols: neededScrips() }).prices;
 }
 
-/**
- * Write today's prices into Holdings Summary column M.
- *
- * A scrip with no price keeps the one it had. Blanking it would make the sheet
- * report the holding as worthless, which is a worse lie than a stale price.
- */
+/** Only the scrips this sheet actually holds, so the reply stays small. */
+function neededScrips() {
+  const tab = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOLDINGS);
+  const slots = findTotalRow(tab) - HOLD_FIRST_ROW;
+  const names = [];
+  tab.getRange(HOLD_FIRST_ROW, 1, slots, 1).getValues().forEach(function (r) {
+    const scrip = String(r[0]).trim().toUpperCase();
+    if (scrip) names.push(scrip);
+  });
+  return names;
+}
+
 function refreshPrices(sheet) {
   const prices = fetchPrices();
   const tab = sheet.getSheetByName(HOLDINGS);

@@ -286,3 +286,30 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
         total_realised=round(sum(r.realised for r in rows), 2),
         notes=notes,
     )
+
+
+class PricesRequest(BaseModel):
+    symbols: list[str] = Field(default_factory=list)
+
+
+@app.post("/prices-for")
+def prices_for(request: PricesRequest) -> dict:
+    """Prices for a named list of symbols, posted rather than in the URL.
+
+    Apps Script cannot reach the exchange itself - UrlFetchApp reports the
+    address as unavailable from Google's network - so callers ask for prices
+    here. This only proxies the same public page anyone can open, holds it for
+    a few minutes, and keeps nothing.
+    """
+    try:
+        everything = psx.all_prices()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"PSX unavailable: {exc}")
+
+    wanted = [s.strip().upper() for s in request.symbols if s and s.strip()]
+    if not wanted:
+        return {"prices": {}, "missing": []}
+    return {
+        "prices": {s: everything[s] for s in wanted if s in everything},
+        "missing": [s for s in wanted if s not in everything],
+    }
