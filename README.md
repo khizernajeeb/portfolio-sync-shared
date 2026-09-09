@@ -1,3 +1,13 @@
+---
+title: Portfolio Sync
+emoji: 📈
+colorFrom: green
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Portfolio Sync
 
 A small service that turns broker trade-confirmation PDFs into rows a spreadsheet
